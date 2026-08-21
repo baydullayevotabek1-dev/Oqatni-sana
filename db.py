@@ -113,6 +113,12 @@ def get_open_session(chat_id: int) -> sqlite3.Row | None:
         ).fetchone()
 
 
+def get_all_open_sessions() -> list[sqlite3.Row]:
+    """Barcha chatlardagi ochiq sessiyalarni qaytaradi (kunlik hisobot uchun)."""
+    with _connect() as conn:
+        return conn.execute("SELECT * FROM sessions WHERE is_open = 1").fetchall()
+
+
 def close_session(chat_id: int) -> bool:
     with _connect() as conn:
         cur = conn.execute(

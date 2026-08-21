@@ -11,11 +11,13 @@ DIQQAT: to'liq avtomatik ishlashi uchun BotFather'da Group Privacy O'CHIRILGAN
 bo'lishi shart (aks holda bot boshqa odamlarning xabarlarini ko'rmaydi).
 """
 
+import datetime as dt
 import html
 import logging
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from telegram import Update
@@ -239,6 +241,11 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     else:
         matched = match.match_items(text, items)
 
+    # Nom bo'yicha topilmasa, ovqat tartib raqami ("1", "2" kabi) yozilganmi
+    # tekshiramiz (menyu raqamlangan holda chiqariladi).
+    if not matched:
+        matched = match.match_by_number(text, items)
+
     # Bitta ovqatli kunda aniq nom topilmasa ham (masalan rasmga reply qilingan
     # yoki nom xato yozilgan bo'lsa), yagona ovqatga tegishli deb olamiz.
     if not matched and len(items) == 1 and (has_plus or has_minus):
@@ -279,6 +286,15 @@ async def tugat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await message.reply_text("Menyu yopildi.")
     else:
         await message.reply_text("Ochiq menyu yo'q edi.")
+
+
+async def post_daily_report(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Har kuni soat 10:45 (Toshkent vaqti) da ochiq sessiyalar bo'yicha
+    hisobotni guruhga yuboradi. Sessiya YOPILMAYDI — shundan keyin ham
+    "+"/"-" davom etaveradi va jonli hisob yangilanib boradi."""
+    for session in db.get_all_open_sessions():
+        text = "⏰ Soat 10:45 hisoboti:\n\n" + _summary_text(session["id"])
+        await context.bot.send_message(chat_id=session["chat_id"], text=text)
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
@@ -330,6 +346,11 @@ def main() -> None:
             (filters.TEXT | filters.CAPTION) & ~filters.COMMAND,
             on_message,
         )
+    )
+
+    app.job_queue.run_daily(
+        post_daily_report,
+        time=dt.time(hour=10, minute=45, tzinfo=ZoneInfo("Asia/Tashkent")),
     )
 
     logger.info("Bot ishga tushdi. To'xtatish uchun Ctrl+C.")
