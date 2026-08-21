@@ -32,6 +32,7 @@ from telegram.ext import (
 )
 
 import db
+import gemini_intent
 import match
 
 logging.basicConfig(
@@ -109,8 +110,14 @@ def _summary_text(session_id: int) -> str:
     lines = ["📊 Bugungi hisob:"]
     total = 0
     for c in counts:
+        line = f"• {c['name']} — {c['count']} (+)"
+        if c["minus_count"]:
+            line += f" / {c['minus_count']} (-)"
         voters = ", ".join(c["voters"]) if c["voters"] else "—"
-        lines.append(f"• {c['name']} — {c['count']}  ({voters})")
+        line += f"\n   ✅ {voters}"
+        if c["minus_count"]:
+            line += f"\n   ❌ {', '.join(c['minus_voters'])}"
+        lines.append(line)
         total += c["count"]
     lines.append(f"\nJami: {total} ta \"+\"")
     return "\n".join(lines)
@@ -222,49 +229,58 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if session is None:
         return  # hali menyu yo'q
 
-    has_plus = "+" in text
-    has_minus = "-" in text
-    if not (has_plus or has_minus):
-        # ba'zilar shunchaki ovqat nomini yozadi (masalan menyuga reply qilib) — buni
-        # "+" deb qabul qilamiz, AGAR aynan bitta ovqat tilga olingan bo'lsa
-        pass
-
     items = db.get_items(session["id"])
+    item_names = [it["name"] for it in items]
 
-    # Ovqatni aniqlash: avval reply-quote, keyin xabar matni
-    target_text = text
     quote = getattr(message, "quote", None)
-    if quote is not None and quote.text:
-        matched = match.match_items(quote.text, items)
-        if not matched:
-            matched = match.match_items(text, items)
+    quote_text = quote.text if quote is not None and quote.text else None
+
+    gemini_result = gemini_intent.interpret(text, item_names, quote_text)
+
+    if gemini_result is not None:
+        intent, numbers = gemini_result
+        matched = [items[n - 1] for n in numbers if 1 <= n <= len(items)]
+        has_plus = intent == "plus"
+        has_minus = intent == "minus"
+        if intent == "none" and not matched:
+            return
     else:
-        matched = match.match_items(text, items)
+        # Gemini ishlamasa (key yo'q yoki xato) — mahalliy qoidalarga qaytamiz.
+        has_plus = "+" in text
+        has_minus = "-" in text
 
-    # Nom bo'yicha topilmasa, ovqat tartib raqami ("1", "2" kabi) yozilganmi
-    # tekshiramiz (menyu raqamlangan holda chiqariladi).
-    if not matched:
-        matched = match.match_by_number(text, items)
+        if quote_text:
+            matched = match.match_items(quote_text, items)
+            if not matched:
+                matched = match.match_items(text, items)
+        else:
+            matched = match.match_items(text, items)
 
-    # Bitta ovqatli kunda aniq nom topilmasa ham (masalan rasmga reply qilingan
-    # yoki nom xato yozilgan bo'lsa), yagona ovqatga tegishli deb olamiz.
-    if not matched and len(items) == 1 and (has_plus or has_minus):
-        matched = items
+        if not matched:
+            matched = match.match_by_number(text, items)
+
+        if not matched and len(items) == 1 and (has_plus or has_minus):
+            matched = items
+
+        if not matched and not (has_plus or has_minus):
+            return
 
     changed = False
 
     if has_minus and not has_plus:
-        # "-" = kerak emas. Aniq ovqat bo'lsa o'shani, bo'lmasa hammasini olib tashlaymiz.
+        # "-" = kerak emas. Aniq ovqat bo'lsa o'shani "-" deb belgilaymiz,
+        # bo'lmasa foydalanuvchining shu sessiondagi barcha ovozlarini tozalaymiz.
         if matched:
             for it in matched:
-                changed |= db.remove_vote(it["id"], user.id)
+                if db.set_vote(it["id"], user.id, _display_name(user), -1):
+                    changed = True
         else:
             changed = db.remove_all_votes(session["id"], user.id) > 0
     else:
-        # "+" bor, yoki faqat ovqat nomi yozilgan (aniq bitta ovqat) → ovoz
+        # "+" — ovqatga ovoz.
         if matched and (has_plus or len(matched) == 1):
             for it in matched:
-                if db.add_vote(it["id"], user.id, _display_name(user)):
+                if db.set_vote(it["id"], user.id, _display_name(user), 1):
                     changed = True
 
     if changed:

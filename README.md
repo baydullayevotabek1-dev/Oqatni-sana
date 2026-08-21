@@ -9,9 +9,16 @@ Ish guruhida har kuni ovqat menyusi chiqqanda, kim qaysi ovqatni tanlaganini
    qatorda bitta ovqat; bitta ovqatli kunlarda forward qilingan bitta qator
    ham yetarli). Bot buni **avtomatik** aniqlaydi — buyruq shart emas.
 2. Bot menyuni raqamlab qayta chiqaradi va bilingan barcha a'zolarni teglaydi.
-3. Har kim kerakli ovqatga **"+"** yozadi (nomini yozib yoki reply qilib),
-   kerak bo'lmasa **"-"** yozadi.
-4. Bot jonli hisob xabarini yangilab boradi; `/hisob` bilan ham ko'rish mumkin.
+3. Har kim kerakli ovqatni erkin uslubda yozadi — **"+"**, ovqat nomi, tartib
+   raqami ("2"), yoki oddiy gap bilan ("somsa ham qoshib qoy"). Kerak bo'lmasa
+   shunga mos "-" yoki "kerak emas" deb yozadi. Xabarlar **Gemini AI** orqali
+   tushuniladi (GEMINI_API_KEY sozlangan bo'lsa) — kalit bo'lmasa yoki xato
+   bersa, bot mahalliy oddiy qoidalarga (nom/raqam moslash) qaytadi.
+4. Bot jonli hisob xabarini yangilab boradi — har ovqat uchun "+" va "-"
+   sonlari alohida ko'rsatiladi. `/hisob` bilan ham ko'rish mumkin.
+5. Har kuni soat **10:45** (Toshkent vaqti) da bot avtomatik hisobotni
+   guruhga yuboradi — sessiya yopilmaydi, undan keyin ham ovoz berish
+   davom etadi.
 
 Buyruqlar: `/start` (yordam), `/hisob`, `/tugat` (menyuni yopish), `/royxat`
 (hali gapirmagan a'zo o'zini teglash ro'yxatiga qo'shadi).
@@ -20,12 +27,13 @@ Buyruqlar: `/start` (yordam), `/hisob`, `/tugat` (menyuni yopish), `/royxat`
 
 | Fayl | Vazifasi |
 |------|----------|
-| `bot.py` | Asosiy bot: handlerlar, menyu aniqlash, health-server |
+| `bot.py` | Asosiy bot: handlerlar, menyu aniqlash, health-server, kunlik hisobot |
 | `db.py` | SQLite ma'lumotlar bazasi funksiyalari |
-| `match.py` | Kirill/lotin transliteratsiya va ovqat nomini matndan topish |
+| `match.py` | Kirill/lotin transliteratsiya, nom/raqam bo'yicha ovqat topish (Gemini ishlamasa fallback) |
+| `gemini_intent.py` | Gemini AI orqali xabar ma'nosini (ovqat + intent) aniqlash |
 | `requirements.txt` | Kutubxonalar |
 | `render.yaml` | Render.com uchun tayyor konfiguratsiya |
-| `.env` | Bot tokeni (o'zingiz yaratasiz, git'ga tushmaydi) |
+| `.env` | Bot tokeni va Gemini key (o'zingiz yaratasiz, git'ga tushmaydi) |
 | `data.db` | Hisob ma'lumotlari (avtomatik yaratiladi) |
 
 ## Mahalliy (lokal) ishga tushirish
@@ -47,7 +55,12 @@ pip install -r requirements.txt
 
 ```
 BOT_TOKEN=123456789:ABC...sizning_tokeningiz
+GEMINI_API_KEY=AIzaSy...sizning_keyingiz
 ```
+
+`GEMINI_API_KEY` — [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+dan bepul olinadi (kredit karta shart emas). Bo'lmasa ham bot ishlayveradi,
+faqat erkin yozilgan xabarlarni yomonroq tushunadi.
 
 ```bash
 python bot.py
@@ -90,7 +103,7 @@ git push -u origin main
    - **Build Command:** `pip install -r requirements.txt`
    - **Start Command:** `python bot.py`
    - **Plan:** Free
-4. **Environment** bo'limida qo'shing: `BOT_TOKEN` = sizning tokeningiz.
+4. **Environment** bo'limida qo'shing: `BOT_TOKEN` va `GEMINI_API_KEY`.
 5. **Create Web Service** — Render avtomatik `PORT` o'zgaruvchisini beradi,
    bot buni o'zi o'qib, health-server'ni ishga tushiradi.
 

@@ -53,6 +53,7 @@ def init_db() -> None:
                 item_id   INTEGER NOT NULL,
                 user_id   INTEGER NOT NULL,
                 user_name TEXT    NOT NULL,
+                value     INTEGER NOT NULL DEFAULT 1,
                 PRIMARY KEY (item_id, user_id),
                 FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
             );
@@ -69,6 +70,13 @@ def init_db() -> None:
             );
             """
         )
+        # Migratsiya: eski (Render'da allaqachon yaratilgan) "votes" jadvalida
+        # "value" ustuni bo'lmasligi mumkin — bo'lsa qo'shamiz.
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(votes)")}
+        if "value" not in cols:
+            conn.execute(
+                "ALTER TABLE votes ADD COLUMN value INTEGER NOT NULL DEFAULT 1"
+            )
 
 
 def create_menu(chat_id: int, menu_message_id: int, names: list[str]) -> int:
@@ -155,23 +163,31 @@ def get_items(session_id: int) -> list[dict]:
         ]
 
 
-def add_vote(item_id: int, user_id: int, user_name: str) -> bool:
-    with _connect() as conn:
-        cur = conn.execute(
-            "INSERT OR IGNORE INTO votes (item_id, user_id, user_name) "
-            "VALUES (?, ?, ?)",
-            (item_id, user_id, user_name),
-        )
-        return cur.rowcount > 0
+def set_vote(item_id: int, user_id: int, user_name: str, value: int) -> bool:
+    """Ovozni qo'yadi/yangilaydi: value=1 ("+"), value=-1 ("-").
 
-
-def remove_vote(item_id: int, user_id: int) -> bool:
+    Xuddi shu qiymat bilan qayta yozilsa, o'zgarish bo'lmagan deb False
+    qaytaradi (ism yangilanadi, lekin hisobga ta'sir qilmaydi).
+    """
     with _connect() as conn:
-        cur = conn.execute(
-            "DELETE FROM votes WHERE item_id = ? AND user_id = ?",
+        row = conn.execute(
+            "SELECT value FROM votes WHERE item_id = ? AND user_id = ?",
             (item_id, user_id),
+        ).fetchone()
+        if row is not None and row["value"] == value:
+            conn.execute(
+                "UPDATE votes SET user_name = ? WHERE item_id = ? AND user_id = ?",
+                (user_name, item_id, user_id),
+            )
+            return False
+        conn.execute(
+            "INSERT INTO votes (item_id, user_id, user_name, value) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(item_id, user_id) DO UPDATE SET "
+            "user_name = excluded.user_name, value = excluded.value",
+            (item_id, user_id, user_name, value),
         )
-        return cur.rowcount > 0
+        return True
 
 
 def remove_all_votes(session_id: int, user_id: int) -> int:
@@ -211,7 +227,11 @@ def get_members(chat_id: int) -> list[dict]:
 
 
 def get_counts(session_id: int) -> list[dict]:
-    """Har ovqat uchun {name, count, voters(list of names)} qaytaradi."""
+    """Har ovqat uchun {name, count, voters, minus_count, minus_voters} qaytaradi.
+
+    count/voters — "+" qo'yganlar, minus_count/minus_voters — aniq "-" deb
+    (ovqat nomini bildirib) rad etganlar.
+    """
     with _connect() as conn:
         items = conn.execute(
             "SELECT id, name FROM items WHERE session_id = ? ORDER BY id",
@@ -219,10 +239,19 @@ def get_counts(session_id: int) -> list[dict]:
         ).fetchall()
         result = []
         for it in items:
-            voters = conn.execute(
-                "SELECT user_name FROM votes WHERE item_id = ? ORDER BY rowid",
+            rows = conn.execute(
+                "SELECT user_name, value FROM votes WHERE item_id = ? ORDER BY rowid",
                 (it["id"],),
             ).fetchall()
-            names = [v["user_name"] for v in voters]
-            result.append({"name": it["name"], "count": len(names), "voters": names})
+            plus_names = [r["user_name"] for r in rows if r["value"] == 1]
+            minus_names = [r["user_name"] for r in rows if r["value"] == -1]
+            result.append(
+                {
+                    "name": it["name"],
+                    "count": len(plus_names),
+                    "voters": plus_names,
+                    "minus_count": len(minus_names),
+                    "minus_voters": minus_names,
+                }
+            )
         return result
