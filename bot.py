@@ -1,0 +1,340 @@
+"""Ovqat "+" hisoblovchi Telegram bot (to'liq avtomatik).
+
+Jarayon (guruhdagi haqiqiy format bo'yicha):
+  1. Kimdir menyuni chiqaradi — odatda Malika'dan FORWARD qilingan, har qatorda
+     bitta ovqat (masalan: Мохора / Ош / Голупси). Bot buni AVTOMATIK aniqlaydi.
+  2. Bollar ovqatga "+" yozadi — menyuga reply qilib (ovqatni belgilab/quote),
+     yoki oddiy "Osh +", "Ош+" deб. Bot ovqatni topib sanaydi. "-" = kerak emas.
+  3. Bot jonli hisob xabarini yangilab turadi; /hisob ham ishlaydi.
+
+DIQQAT: to'liq avtomatik ishlashi uchun BotFather'da Group Privacy O'CHIRILGAN
+bo'lishi shart (aks holda bot boshqa odamlarning xabarlarini ko'rmaydi).
+"""
+
+import html
+import logging
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+from dotenv import load_dotenv
+from telegram import Update
+from telegram.constants import ChatType, ParseMode
+from telegram.error import BadRequest
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
+
+import db
+import match
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
+# Menyu deb qabul qilinadigan matnda qatorlar soni chegaralari
+MIN_MENU_LINES = 2
+MAX_MENU_LINES = 8
+MAX_LINE_LEN = 40
+
+
+def _display_name(user) -> str:
+    if user.username:
+        return f"@{user.username}"
+    return user.full_name
+
+
+def _menu_lines(text: str, min_lines: int = MIN_MENU_LINES) -> list[str] | None:
+    """Matn menyuga o'xshasa, ovqat nomlari ro'yxatini qaytaradi, aks holda None.
+
+    min_lines — kamida nechta taom qatori bo'lishi kerak (forward qilingan
+    xabarlar uchun 1 taom ham yetarli, chunki ba'zi kunlar bitta ovqat bo'ladi).
+    """
+    raw = [ln.strip(" \t.-•*") for ln in text.splitlines()]
+    lines = [ln for ln in raw if ln]
+    if not (1 <= len(lines) <= MAX_MENU_LINES):
+        return None
+    seen: set[str] = set()
+    items: list[str] = []
+    for ln in lines:
+        # "+"/"-" bo'lgan qatorlar ovqat nomi emas
+        if "+" in ln or ln in {"-", "—"}:
+            return None
+        if len(ln) > MAX_LINE_LEN:
+            return None
+        key = match.normalize(ln)
+        if key and key not in seen:
+            seen.add(key)
+            items.append(ln)
+    return items if len(items) >= min_lines else None
+
+
+def _mention_html(member: dict) -> str:
+    """Bitta a'zo uchun HTML mention (bosilsa profiliga olib boradi)."""
+    if member["username"]:
+        return f"@{member['username']}"
+    name = html.escape(member["name"] or "a'zo")
+    return f'<a href="tg://user?id={member["user_id"]}">{name}</a>'
+
+
+def _build_mention_chunks(members: list[dict], max_len: int = 3500) -> list[str]:
+    """A'zolar teglarini Telegram xabar uzunligiga sig'adigan bo'laklarga bo'ladi."""
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for m in members:
+        tag = _mention_html(m)
+        add_len = len(tag) + 1
+        if current and current_len + add_len > max_len:
+            chunks.append(" ".join(current))
+            current = []
+            current_len = 0
+        current.append(tag)
+        current_len += add_len
+    if current:
+        chunks.append(" ".join(current))
+    return chunks
+
+
+def _summary_text(session_id: int) -> str:
+    counts = db.get_counts(session_id)
+    lines = ["📊 Bugungi hisob:"]
+    total = 0
+    for c in counts:
+        voters = ", ".join(c["voters"]) if c["voters"] else "—"
+        lines.append(f"• {c['name']} — {c['count']}  ({voters})")
+        total += c["count"]
+    lines.append(f"\nJami: {total} ta \"+\"")
+    return "\n".join(lines)
+
+
+async def _refresh_summary(context, chat_id: int, session) -> None:
+    """Jonli hisob xabarini yangilaydi (bo'lmasa yangi yaratadi)."""
+    text = _summary_text(session["id"])
+    msg_id = session["summary_message_id"]
+    if msg_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id, message_id=msg_id, text=text
+            )
+            return
+        except BadRequest as e:
+            if "not modified" in str(e).lower():
+                return
+            # xabar o'chirilgan/tahrirlab bo'lmasa — yangisini yuboramiz
+    sent = await context.bot.send_message(chat_id=chat_id, text=text)
+    db.set_summary_message(session["id"], sent.message_id)
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "Salom! Men ovqat hisoblovchi botman.\n\n"
+        "Menyuni odam chiqaradi (har qatorda bitta ovqat). Men avtomatik "
+        "aniqlab, bollarning \"+\" larini sanayman.\n\n"
+        "• \"+\" — ovqatni olaman (ovqat nomini yozib yoki menyuga reply qilib)\n"
+        "• \"-\" — menga kerak emas\n"
+        "• /hisob — joriy hisobni ko'rsataman\n"
+        "• /royxat — menyu chiqqanda meni ham teglashini xohlasangiz, "
+        "bir marta shuni yozing\n\n"
+        "⚠️ Guruhda hammani ko'rishim uchun BotFather'da Group Privacy "
+        "O'CHIRILGAN bo'lishi kerak."
+    )
+
+
+async def royxat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.message
+    if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+        await message.reply_text("Bu buyruq faqat guruhda ishlaydi.")
+        return
+    user = message.from_user
+    db.upsert_member(message.chat_id, user.id, user.full_name, user.username)
+    await message.reply_text(
+        f"✅ {_display_name(user)}, endi menyu chiqqanda sizni ham teglayman."
+    )
+
+
+async def on_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.message
+    for user in message.new_chat_members or []:
+        if not user.is_bot:
+            db.upsert_member(message.chat_id, user.id, user.full_name, user.username)
+
+
+async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.message
+    if message is None or message.chat.type not in (
+        ChatType.GROUP,
+        ChatType.SUPERGROUP,
+    ):
+        return
+
+    user = message.from_user
+    if user is None or user.is_bot:
+        return  # botlarning (jumladan o'zimizning) xabarlarini e'tiborsiz qoldiramiz
+
+    chat_id = message.chat_id
+    db.upsert_member(chat_id, user.id, user.full_name, user.username)
+
+    text = message.text or message.caption or ""
+    if not text.strip():
+        return
+
+    # --- 1) Menyu aniqlash: FORWARD qilingan yoki ko'p qatorli, reply emas ---
+    # Forward qilingan xabar uchun 1 taom ham yetarli (ba'zi kunlar bitta ovqat
+    # bo'ladi); forward qilinmagan matn uchun kamida MIN_MENU_LINES qator kerak
+    # (aks holda oddiy bitta so'zli xabar ham menyu deb qabul qilinib qoladi).
+    is_forwarded = getattr(message, "forward_origin", None) is not None
+    if not message.reply_to_message:
+        menu = _menu_lines(text, min_lines=1 if is_forwarded else MIN_MENU_LINES)
+        if menu is not None:
+            session_id = db.create_menu(chat_id, message.message_id, menu)
+            session = db.get_open_session(chat_id)
+
+            menu_text = (
+                "🍽 Bugungi menyu:\n"
+                + "\n".join(f"{i}. {n}" for i, n in enumerate(menu, 1))
+                + "\n\nKerakligiga \"+\" yozing (\"-\" — kerak emas)."
+            )
+            await context.bot.send_message(chat_id=chat_id, text=menu_text)
+
+            members = [m for m in db.get_members(chat_id) if m["user_id"] != user.id]
+            for chunk in _build_mention_chunks(members):
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"📣 {chunk}",
+                    parse_mode=ParseMode.HTML,
+                )
+
+            await _refresh_summary(context, chat_id, session)
+            logger.info("Menyu: chat=%s session=%s ovqatlar=%s", chat_id, session_id, menu)
+            return
+
+    # --- 2) Ovoz sifatida qayta ishlash ---
+    session = db.get_open_session(chat_id)
+    if session is None:
+        return  # hali menyu yo'q
+
+    has_plus = "+" in text
+    has_minus = "-" in text
+    if not (has_plus or has_minus):
+        # ba'zilar shunchaki ovqat nomini yozadi (masalan menyuga reply qilib) — buni
+        # "+" deb qabul qilamiz, AGAR aynan bitta ovqat tilga olingan bo'lsa
+        pass
+
+    items = db.get_items(session["id"])
+
+    # Ovqatni aniqlash: avval reply-quote, keyin xabar matni
+    target_text = text
+    quote = getattr(message, "quote", None)
+    if quote is not None and quote.text:
+        matched = match.match_items(quote.text, items)
+        if not matched:
+            matched = match.match_items(text, items)
+    else:
+        matched = match.match_items(text, items)
+
+    # Bitta ovqatli kunda aniq nom topilmasa ham (masalan rasmga reply qilingan
+    # yoki nom xato yozilgan bo'lsa), yagona ovqatga tegishli deb olamiz.
+    if not matched and len(items) == 1 and (has_plus or has_minus):
+        matched = items
+
+    changed = False
+
+    if has_minus and not has_plus:
+        # "-" = kerak emas. Aniq ovqat bo'lsa o'shani, bo'lmasa hammasini olib tashlaymiz.
+        if matched:
+            for it in matched:
+                changed |= db.remove_vote(it["id"], user.id)
+        else:
+            changed = db.remove_all_votes(session["id"], user.id) > 0
+    else:
+        # "+" bor, yoki faqat ovqat nomi yozilgan (aniq bitta ovqat) → ovoz
+        if matched and (has_plus or len(matched) == 1):
+            for it in matched:
+                if db.add_vote(it["id"], user.id, _display_name(user)):
+                    changed = True
+
+    if changed:
+        await _refresh_summary(context, chat_id, session)
+
+
+async def hisob(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.message
+    session = db.get_open_session(message.chat_id)
+    if session is None:
+        await message.reply_text("Hozircha menyu aniqlanmadi.")
+        return
+    await message.reply_text(_summary_text(session["id"]))
+
+
+async def tugat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.message
+    if db.close_session(message.chat_id):
+        await message.reply_text("Menyu yopildi.")
+    else:
+        await message.reply_text("Ochiq menyu yo'q edi.")
+
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    """Render (yoki boshqa hosting) 'web service' sifatida tan olishi va
+    uxlab qolmasligi uchun tashqi ping xizmatlari (masalan UptimeRobot)
+    urib turadigan minimal HTTP endpoint."""
+
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot ishlab turibdi.")
+
+    def log_message(self, format, *args):
+        pass  # HTTP so'rovlarini bot.log ga chiqarmaymiz
+
+
+def _start_health_server() -> None:
+    port = int(os.getenv("PORT", "8080"))
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    server.serve_forever()
+
+
+def main() -> None:
+    load_dotenv()
+    token = os.getenv("BOT_TOKEN")
+    if not token:
+        raise SystemExit("BOT_TOKEN topilmadi. .env fayliga tokenni qo'ying.")
+
+    if os.getenv("PORT"):
+        # Render kabi hostinglar $PORT beradi va shu portni tinglashni talab
+        # qiladi (aks holda "web service" sifatida ishga tushmaydi).
+        threading.Thread(target=_start_health_server, daemon=True).start()
+        logger.info("Health-check server ishga tushdi (port=%s).", os.getenv("PORT"))
+
+    db.init_db()
+
+    app = Application.builder().token(token).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", start))
+    app.add_handler(CommandHandler("hisob", hisob))
+    app.add_handler(CommandHandler("tugat", tugat))
+    app.add_handler(CommandHandler("royxat", royxat))
+    app.add_handler(
+        MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_members)
+    )
+    # Buyruq bo'lmagan barcha matnli xabarlar (menyu yoki ovoz)
+    app.add_handler(
+        MessageHandler(
+            (filters.TEXT | filters.CAPTION) & ~filters.COMMAND,
+            on_message,
+        )
+    )
+
+    logger.info("Bot ishga tushdi. To'xtatish uchun Ctrl+C.")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()
