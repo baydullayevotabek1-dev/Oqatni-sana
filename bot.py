@@ -364,10 +364,16 @@ def main() -> None:
         )
     )
 
-    app.job_queue.run_daily(
-        post_daily_report,
-        time=dt.time(hour=10, minute=45, tzinfo=ZoneInfo("Asia/Tashkent")),
-    )
+    if app.job_queue is None:
+        logger.warning(
+            "job_queue mavjud emas — kunlik 10:45 hisoboti ishlamaydi "
+            "('python-telegram-bot[job-queue]' o'rnatilganini tekshiring)."
+        )
+    else:
+        app.job_queue.run_daily(
+            post_daily_report,
+            time=dt.time(hour=10, minute=45, tzinfo=ZoneInfo("Asia/Tashkent")),
+        )
 
     logger.info("Bot ishga tushdi. To'xtatish uchun Ctrl+C.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
