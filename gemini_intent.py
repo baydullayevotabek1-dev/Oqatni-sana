@@ -115,3 +115,51 @@ def interpret(
     except Exception as e:
         logger.warning("Gemini so'rovi muvaffaqiyatsiz (%s), mahalliy qoidaga qaytamiz.", e)
         return None
+
+
+_MENU_SCHEMA = {
+    "type": "object",
+    "properties": {"is_menu": {"type": "boolean"}},
+    "required": ["is_menu"],
+}
+
+
+def is_menu(lines: list[str]) -> bool | None:
+    """Berilgan qatorlar haqiqatan ham ovqat/taom nomlari ro'yxatimi, yoki
+    shunchaki oddiy xabar/eslatmami — shuni aniqlaydi.
+
+    Forward qilinmagan (odam to'g'ridan-to'g'ri yozgan) ko'p qatorli
+    xabarlarni "yangi menyu" deb noto'g'ri qabul qilib, joriy sessiyani
+    yopib qo'ymaslik uchun ishlatiladi. Gemini mavjud bo'lmasa yoki xato
+    bersa — None (chaqiruvchi bunda ehtiyotkorlik bilan "menyu emas" deb
+    hisoblashi kerak).
+    """
+    client = _get_client()
+    if client is None or not lines:
+        return None
+
+    lines_block = "\n".join(f"- {ln}" for ln in lines)
+    prompt = (
+        "Quyidagi qatorlar Telegram guruhidagi bir xabardan olingan:\n"
+        f"{lines_block}\n\n"
+        "Bu haqiqatan ham BUGUNGI OVQAT/TAOM MENYUSI (taom nomlari ro'yxati, "
+        "masalan \"Osh\", \"Somsa\", \"Kotlet mix\")mi? Yoki bu shunchaki "
+        "oddiy xabar, eslatma, sarlavha yoki boshqa mavzu (masalan \"Obed\" "
+        "so'zi yolg'iz, miqdor haqida eslatma, salomlashish va h.k.)mi?\n"
+        "is_menu: taom nomlari ro'yxati bo'lsa true, aks holda false."
+    )
+
+    try:
+        response = client.models.generate_content(
+            model=_MODEL,
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json",
+                "response_schema": _MENU_SCHEMA,
+            },
+        )
+        data = json.loads(response.text)
+        return bool(data.get("is_menu"))
+    except Exception as e:
+        logger.warning("Gemini menyu-tasdiqlash so'rovi muvaffaqiyatsiz (%s).", e)
+        return None

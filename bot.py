@@ -150,7 +150,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "• \"-\" — menga kerak emas\n"
         "• /hisob — joriy hisobni ko'rsataman\n"
         "• /royxat — menyu chiqqanda meni ham teglashini xohlasangiz, "
-        "bir marta shuni yozing\n\n"
+        "bir marta shuni yozing\n"
+        "• /bekor — men xato ravishda yangi menyu deb tanib, hisobni "
+        "yopib qo'ysam, shu bilan avvalgisini tiklayman\n\n"
         "⚠️ Guruhda hammani ko'rishim uchun BotFather'da Group Privacy "
         "O'CHIRILGAN bo'lishi kerak."
     )
@@ -196,11 +198,17 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     # --- 1) Menyu aniqlash: FORWARD qilingan yoki ko'p qatorli, reply emas ---
     # Forward qilingan xabar uchun 1 taom ham yetarli (ba'zi kunlar bitta ovqat
-    # bo'ladi); forward qilinmagan matn uchun kamida MIN_MENU_LINES qator kerak
-    # (aks holda oddiy bitta so'zli xabar ham menyu deb qabul qilinib qoladi).
+    # bo'ladi); forward qilinmagan matn uchun kamida MIN_MENU_LINES qator kerak.
+    # Forward qilinmagan holatda esa, tasodifiy oddiy xabar/eslatma ("Obed",
+    # miqdor haqida eslatma va h.k.) noto'g'ri "yangi menyu" deb qabul qilinib,
+    # joriy sessiyani yopib qo'ymasligi uchun Gemini orqali tasdiqlanadi —
+    # Gemini "ha, bu menyu" demaguncha yangi sessiya OCHILMAYDI.
     is_forwarded = getattr(message, "forward_origin", None) is not None
     if not message.reply_to_message:
         menu = _menu_lines(text, min_lines=1 if is_forwarded else MIN_MENU_LINES)
+        if menu is not None and not is_forwarded:
+            if gemini_intent.is_menu(menu) is not True:
+                menu = None
         if menu is not None:
             session_id = db.create_menu(chat_id, message.message_id, menu)
             session = db.get_open_session(chat_id)
@@ -311,6 +319,21 @@ async def tugat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await message.reply_text("Ochiq menyu yo'q edi.")
 
 
+async def bekor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Bot xato ravishda yangi menyu deb tanib, joriy sessiyani noto'g'ri
+    yopib qo'yganda — shu buyruq bilan avvalgi sessiya qayta tiklanadi."""
+    message = update.message
+    chat_id = message.chat_id
+    if db.reopen_previous_session(chat_id):
+        session = db.get_open_session(chat_id)
+        await message.reply_text(
+            "↩️ Oxirgi menyu bekor qilindi, avvalgi sessiya (va ovozlar) tiklandi."
+        )
+        await _refresh_summary(context, chat_id, session)
+    else:
+        await message.reply_text("Bekor qilinadigan avvalgi sessiya topilmadi.")
+
+
 async def post_daily_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Har kuni soat 10:45 (Toshkent vaqti) da ochiq sessiyalar bo'yicha
     hisobotni guruhga yuboradi. Sessiya YOPILMAYDI — shundan keyin ham
@@ -360,6 +383,7 @@ def main() -> None:
     app.add_handler(CommandHandler("hisob", hisob))
     app.add_handler(CommandHandler("tugat", tugat))
     app.add_handler(CommandHandler("royxat", royxat))
+    app.add_handler(CommandHandler("bekor", bekor))
     app.add_handler(
         MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_members)
     )

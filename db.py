@@ -127,6 +127,33 @@ def get_all_open_sessions() -> list[sqlite3.Row]:
         return conn.execute("SELECT * FROM sessions WHERE is_open = 1").fetchall()
 
 
+def reopen_previous_session(chat_id: int) -> bool:
+    """Joriy ochiq sessiyani yopib, undan oldingi (yopiq) sessiyani qayta
+    ochadi. Bot xato ravishda yangi menyu deb tanib, haqiqiy sessiyani
+    yopib qo'yganda tuzatish uchun ("/bekor" buyrug'i ishlatadi).
+
+    Muvaffaqiyatli bo'lsa True.
+    """
+    with _connect() as conn:
+        current = conn.execute(
+            "SELECT id FROM sessions WHERE chat_id = ? AND is_open = 1 "
+            "ORDER BY id DESC LIMIT 1",
+            (chat_id,),
+        ).fetchone()
+        if current is None:
+            return False
+        prev = conn.execute(
+            "SELECT id FROM sessions WHERE chat_id = ? AND id < ? "
+            "ORDER BY id DESC LIMIT 1",
+            (chat_id, current["id"]),
+        ).fetchone()
+        if prev is None:
+            return False
+        conn.execute("UPDATE sessions SET is_open = 0 WHERE id = ?", (current["id"],))
+        conn.execute("UPDATE sessions SET is_open = 1 WHERE id = ?", (prev["id"],))
+        return True
+
+
 def close_session(chat_id: int) -> bool:
     with _connect() as conn:
         cur = conn.execute(
