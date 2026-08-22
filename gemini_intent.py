@@ -86,8 +86,15 @@ def interpret(
         "umuman aloqasi bo'lmagan xabar (salomlashish, boshqa mavzu) "
         "bo'lsa \"none\".\n"
         "- item_numbers: xabarda nazarda tutilgan ovqat(lar)ning yuqoridagi "
-        "menyudagi tartib raqami(lari) (bo'sh ro'yxat bo'lishi ham mumkin, "
-        "masalan aniq ovqat ko'rsatilmagan umumiy \"-\" bo'lsa)."
+        "menyudagi tartib raqami(lari).\n\n"
+        "MUHIM: agar foydalanuvchi xabari faqat \"+\" yoki \"-\" (yoki shunga "
+        "o'xshash, aniq ovqat nomi/raqami YO'Q) bo'lsa, lekin u biror xabarga "
+        "REPLY qilgan bo'lsa ('Foydalanuvchi reply qilgan xabar' qismiga "
+        "qarang) — o'sha reply qilingan xabarda nechta ovqat tilga olingan "
+        "bo'lsa, ularning HAMMASINI item_numbers ga qo'shing (chunki "
+        "foydalanuvchi aynan o'sha xabardagi narsa(lar)ga javob bermoqda). "
+        "Faqat reply qilingan xabarda umuman ovqat nomi bo'lmasa (masalan "
+        "odamlarni belgilash/tag xabari bo'lsa), item_numbers bo'sh qoladi."
     )
 
     try:

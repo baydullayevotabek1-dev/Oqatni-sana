@@ -232,8 +232,15 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     items = db.get_items(session["id"])
     item_names = [it["name"] for it in items]
 
+    # Reply konteksti: avval Telegram'ning "aniq belgilangan matn" (quote)
+    # xususiyatini tekshiramiz; odamlar ko'pincha esa oddiy "Reply" bosib,
+    # matn belgilamasdan javob beradi — bunda reply_to_message ning TO'LIQ
+    # matnini olamiz, aks holda uning "+"/"-" i qaysi ovqatga tegishli
+    # ekanini bilolmay, ovoz yo'qolib qoladi.
     quote = getattr(message, "quote", None)
     quote_text = quote.text if quote is not None and quote.text else None
+    if not quote_text and message.reply_to_message is not None:
+        quote_text = message.reply_to_message.text or message.reply_to_message.caption
 
     gemini_result = gemini_intent.interpret(text, item_names, quote_text)
 
