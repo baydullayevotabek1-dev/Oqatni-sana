@@ -20,7 +20,7 @@ DB_PATH = Path(__file__).with_name("data.db")
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
     return conn
@@ -127,31 +127,31 @@ def get_all_open_sessions() -> list[sqlite3.Row]:
         return conn.execute("SELECT * FROM sessions WHERE is_open = 1").fetchall()
 
 
-def reopen_previous_session(chat_id: int) -> bool:
+def reopen_previous_session(chat_id: int) -> sqlite3.Row | None:
     """Joriy ochiq sessiyani yopib, undan oldingi (yopiq) sessiyani qayta
     ochadi. Bot xato ravishda yangi menyu deb tanib, haqiqiy sessiyani
     yopib qo'yganda tuzatish uchun ("/bekor" buyrug'i ishlatadi).
 
-    Muvaffaqiyatli bo'lsa True.
+    Muvaffaqiyatli bo'lsa, o'chirilishi kerak bo'lgan joriy (noto'g'ri) sessiyani qaytaradi.
     """
     with _connect() as conn:
         current = conn.execute(
-            "SELECT id FROM sessions WHERE chat_id = ? AND is_open = 1 "
+            "SELECT id, summary_message_id FROM sessions WHERE chat_id = ? AND is_open = 1 "
             "ORDER BY id DESC LIMIT 1",
             (chat_id,),
         ).fetchone()
         if current is None:
-            return False
+            return None
         prev = conn.execute(
             "SELECT id FROM sessions WHERE chat_id = ? AND id < ? "
             "ORDER BY id DESC LIMIT 1",
             (chat_id, current["id"]),
         ).fetchone()
         if prev is None:
-            return False
+            return None
         conn.execute("UPDATE sessions SET is_open = 0 WHERE id = ?", (current["id"],))
         conn.execute("UPDATE sessions SET is_open = 1 WHERE id = ?", (prev["id"],))
-        return True
+        return current
 
 
 def close_session(chat_id: int) -> bool:
@@ -282,3 +282,34 @@ def get_counts(session_id: int) -> list[dict]:
                 }
             )
         return result
+
+
+def delete_member(chat_id: int, user_id: int) -> None:
+    """A'zoni teglash ro'yxatidan o'chiradi."""
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM members WHERE chat_id = ? AND user_id = ?",
+            (chat_id, user_id),
+        )
+
+
+def get_pending_voters(session_id: int, chat_id: int) -> list[dict]:
+    """Ushbu sessiyada hali ovoz bermagan (plus ham, minus ham qo'ymagan) a'zolar ro'yxatini qaytaradi."""
+    with _connect() as conn:
+        # Barcha ro'yxatdan o'tgan a'zolar
+        members = conn.execute(
+            "SELECT user_id, name, username FROM members WHERE chat_id = ? ORDER BY rowid",
+            (chat_id,),
+        ).fetchall()
+        # Ovoz bergan a'zolar IDlari
+        voted = conn.execute(
+            "SELECT DISTINCT user_id FROM votes WHERE item_id IN "
+            "(SELECT id FROM items WHERE session_id = ?)",
+            (session_id,),
+        ).fetchall()
+        voted_ids = {r["user_id"] for r in voted}
+        return [
+            {"user_id": m["user_id"], "name": m["name"], "username": m["username"]}
+            for m in members
+            if m["user_id"] not in voted_ids
+        ]
