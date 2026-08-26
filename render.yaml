@@ -12,3 +12,33 @@ services:
         sync: false
       - key: PYTHON_VERSION
         value: 3.12.7
+
+  # Instagram agenti — alohida servis (batafsil: instagram/README.md).
+  # Kerak bo'lmasa, shu blokni o'chirib tashlash mumkin.
+  - type: web
+    name: instagram-agent
+    runtime: python
+    plan: free
+    buildCommand: pip install -r instagram/requirements.txt
+    startCommand: python -m instagram.agent run
+    envVars:
+      - key: IG_ACCESS_TOKEN
+        sync: false
+      - key: IG_USER_ID
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: IG_BRAND
+        sync: false
+      - key: IG_TOPIC
+        sync: false
+      - key: IG_HASHTAGS
+        sync: false
+      - key: IG_POST_TIMES
+        value: "10:00,18:00"
+      - key: IG_LANGUAGE
+        value: uz
+      - key: PYTHON_VERSION
+        value: 3.12.7

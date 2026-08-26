@@ -6,3 +6,5 @@ __pycache__/
 venv/
 .venv/
 .claude/
+instagram/instagram.db
+instagram/media/

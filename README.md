@@ -3,6 +3,9 @@
 Ish guruhida har kuni ovqat menyusi chiqqanda, kim qaysi ovqatni tanlaganini
 ("+" qo'yganini) avtomatik hisoblaydigan bot.
 
+> 📸 Shu repoda **Instagram agenti** ham bor — akkauntingizga o'zi post
+> joylaydi va kommentlarga javob yozadi. Qo'llanma: **[instagram/README.md](instagram/README.md)**.
+
 ## Qanday ishlaydi
 
 1. Guruhda kimdir menyuni yuboradi (forward yoki ko'p qatorli yozuv, har
@@ -35,6 +38,7 @@ Buyruqlar: `/start` (yordam), `/hisob`, `/tugat` (menyuni yopish), `/royxat`
 | `render.yaml` | Render.com uchun tayyor konfiguratsiya |
 | `.env` | Bot tokeni va Gemini key (o'zingiz yaratasiz, git'ga tushmaydi) |
 | `data.db` | Hisob ma'lumotlari (avtomatik yaratiladi) |
+| `instagram/` | Instagram agenti — alohida ishlaydi ([qo'llanma](instagram/README.md)) |
 
 ## Mahalliy (lokal) ishga tushirish
 
@@ -129,3 +133,33 @@ faol ulanish).
 kafolatlanmaydi (Render qayta deploy qilganda diск tozalanadi). Agar kunlik
 hisob tarixi muhim bo'lsa, keyinchalik to'lovli "Persistent Disk" qo'shish
 mumkin.
+
+---
+
+## 📸 Instagram agenti
+
+`instagram/` papkasida Telegram botidan **mustaqil** ishlaydigan ikkinchi
+agent bor. U:
+
+* Instagram akkauntingizga jadval bo'yicha (masalan 10:00 va 18:00 da) **o'zi
+  post joylaydi** — matnni va rasmni Gemini AI yaratadi;
+* xohlasangiz mavzuni **internetdan** (RSS lentalardan) oladi va o'z so'zlari
+  bilan qayta yozadi;
+* kelgan **kommentlarni o'qib, javob yozadi** (komment qaysi tilda bo'lsa —
+  o'sha tilda), spam kommentni yashiradi;
+* xohlasangiz, post joylashdan oldin **Telegram'da sizdan tasdiq so'raydi**
+  (✅ Joylash / ❌ Bekor tugmalari).
+
+**Muhim shart:** Instagram rasmiy API orqali post joylashga faqat
+**Business/Creator (Professional)** akkauntlarga ruxsat beradi — shaxsiy
+akkauntga bo'lmaydi. Akkauntni Professional qilish bepul.
+
+```bash
+pip install -r instagram/requirements.txt
+python -m instagram.agent check          # sozlamalarni tekshirish
+python -m instagram.agent post --dry-run # sinov: matn + rasm ko'rish
+python -m instagram.agent run            # 24/7 rejim
+```
+
+To'liq qo'llanma (token olish, sozlamalar, Render'ga joylash, limitlar):
+**[instagram/README.md](instagram/README.md)**.
