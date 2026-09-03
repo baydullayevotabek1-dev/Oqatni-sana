@@ -519,8 +519,11 @@ async def set_chef(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
     args = context.args or []
 
+    existing_config = db.get_chef_config() or {}
+    existing_tag = existing_config.get("tag", "@shef_povor")
+
     target_chat_id = None
-    tag = "@shef_povor"
+    tag = None
 
     if args and (args[0].startswith("-") or args[0].isdigit()):
         try:
@@ -542,6 +545,9 @@ async def set_chef(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if args:
             tag = args[0]
 
+    if tag is None:
+        tag = existing_tag
+
     if not tag.startswith("@") and not tag.startswith("http"):
         tag = f"@{tag}"
 
@@ -551,12 +557,14 @@ async def set_chef(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     safe_tag = html.escape(str(tag))
 
     await message.reply_text(
-        f"✅ <b>Oshpaz guruhi saqlandi!</b>\n"
+        f"✅ <b>Oshpaz guruhi va tegi doimiy saqlandi!</b>\n\n"
         f"📍 Chat: <b>{safe_title}</b> (<code>{target_chat_id}</code>)\n"
-        f"👨‍🍳 Oshpaz tegi: {safe_tag}\n\n"
-        "Endi menyu ochilib ovoz berilganda, anonim hisobot jonli ravishda shu guruhga kelib turadi.",
+        f"👨‍🍳 Oshpaz tegi: <b>{safe_tag}</b>\n\n"
+        "🔒 <b>Ushbu sozlama bir marta o'rnatildi va doimiy saqlanadi.</b>\n"
+        "Keyinchalik oshpazni yoki guruhni o'zgartirmoqchi bo'lsangiz, shunchaki qaytadan <code>/set_povar @yangi_povor</code> deb yozsangiz kifoya.",
         parse_mode=ParseMode.HTML,
     )
+
 
 
 async def povor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
