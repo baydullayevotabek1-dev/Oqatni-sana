@@ -1,18 +1,9 @@
-"""SQLite ma'lumotlar bazasi bilan ishlash yordamchilari.
-
-Jarayon: menyuni ODAM chiqaradi (bot emas). Bot menyuni avtomatik aniqlab,
-ovqatlarni ro'yxatga oladi, keyin "+"/"-" xabarlarini sanaydi.
-
-Jadvallar:
-  sessions(id, chat_id, date, created_at, is_open,
-           menu_message_id, summary_message_id)
-  items(id, session_id, name, full_norm, first_norm)  -- ovqatlar
-  votes(item_id, user_id, user_name)  -- PK(item_id,user_id): bir odam = bir ovoz
-"""
+"""SQLite ma'lumotlar bazasi moduli (Noldan qurilgan va barqarorlashtirilgan)."""
 
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+import os
 
 import match
 
@@ -37,15 +28,16 @@ def init_db() -> None:
                 created_at         TEXT    NOT NULL,
                 is_open            INTEGER NOT NULL DEFAULT 1,
                 menu_message_id    INTEGER,
-                summary_message_id INTEGER
+                summary_message_id INTEGER,
+                chef_message_id    INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS items (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id INTEGER NOT NULL,
                 name       TEXT    NOT NULL,
-                full_norm  TEXT    NOT NULL,
-                first_norm TEXT    NOT NULL,
+                full_norm  TEXT    NOT NULL DEFAULT '',
+                first_norm TEXT    NOT NULL DEFAULT '',
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
 
@@ -75,13 +67,11 @@ def init_db() -> None:
             );
             """
         )
-        # Migratsiya: eski (Render'da allaqachon yaratilgan) "votes" jadvalida
-        # "value" ustuni bo'lmasligi mumkin — bo'lsa qo'shamiz.
-        cols = {r["name"] for r in conn.execute("PRAGMA table_info(votes)")}
-        if "value" not in cols:
-            conn.execute(
-                "ALTER TABLE votes ADD COLUMN value INTEGER NOT NULL DEFAULT 1"
-            )
+
+        # Safe Column Migrations for Legacy Databases
+        votes_cols = {r["name"] for r in conn.execute("PRAGMA table_info(votes)")}
+        if "value" not in votes_cols:
+            conn.execute("ALTER TABLE votes ADD COLUMN value INTEGER NOT NULL DEFAULT 1")
 
         sess_cols = {r["name"] for r in conn.execute("PRAGMA table_info(sessions)")}
         for col in ("menu_message_id", "summary_message_id", "chef_message_id"):
@@ -108,12 +98,8 @@ def init_db() -> None:
             )
 
 
-
-
-
 def set_chef_config(chat_id: int, tag: str | None = None) -> None:
     """Oshpaz guruhi ID'si va tegini saqlaydi."""
-    import os
     with _connect() as conn:
         conn.execute(
             "INSERT INTO settings (key, value) VALUES ('chef_chat_id', ?) "
@@ -130,14 +116,16 @@ def set_chef_config(chat_id: int, tag: str | None = None) -> None:
 
 def get_chef_config() -> dict | None:
     """Oshpaz guruhi sozlamalarini qaytaradi: {'chat_id': int, 'tag': str}."""
-    import os
     chat_id = None
     tag = None
     with _connect() as conn:
         r_id = conn.execute("SELECT value FROM settings WHERE key = 'chef_chat_id'").fetchone()
         r_tag = conn.execute("SELECT value FROM settings WHERE key = 'chef_tag'").fetchone()
         if r_id:
-            chat_id = int(r_id["value"])
+            try:
+                chat_id = int(r_id["value"])
+            except ValueError:
+                pass
         if r_tag:
             tag = r_tag["value"]
 
@@ -163,12 +151,8 @@ def set_chef_message(session_id: int, message_id: int) -> None:
         )
 
 
-
 def create_menu(chat_id: int, menu_message_id: int, names: list[str]) -> int:
-    """Avvalgi sessionni yopib, yangi menyu bilan yangi session ochadi.
-
-    Yangi session id'sini qaytaradi.
-    """
+    """Avvalgi sessionni yopib, yangi menyu bilan yangi session ochadi."""
     now = datetime.now()
     with _connect() as conn:
         conn.execute(
@@ -207,18 +191,13 @@ def get_open_session(chat_id: int) -> sqlite3.Row | None:
 
 
 def get_all_open_sessions() -> list[sqlite3.Row]:
-    """Barcha chatlardagi ochiq sessiyalarni qaytaradi (kunlik hisobot uchun)."""
+    """Barcha chatlardagi ochiq sessiyalarni qaytaradi."""
     with _connect() as conn:
         return conn.execute("SELECT * FROM sessions WHERE is_open = 1").fetchall()
 
 
 def reopen_previous_session(chat_id: int) -> sqlite3.Row | None:
-    """Joriy ochiq sessiyani yopib, undan oldingi (yopiq) sessiyani qayta
-    ochadi. Bot xato ravishda yangi menyu deb tanib, haqiqiy sessiyani
-    yopib qo'yganda tuzatish uchun ("/bekor" buyrug'i ishlatadi).
-
-    Muvaffaqiyatli bo'lsa, o'chirilishi kerak bo'lgan joriy (noto'g'ri) sessiyani qaytaradi.
-    """
+    """Joriy sessiyani yopib, oldingisini tiklaydi."""
     with _connect() as conn:
         current = conn.execute(
             "SELECT id, summary_message_id FROM sessions WHERE chat_id = ? AND is_open = 1 "
@@ -257,7 +236,6 @@ def set_summary_message(session_id: int, message_id: int) -> None:
 
 
 def get_items(session_id: int) -> list[dict]:
-    """Sessiondagi ovqatlarni match.match_items uchun qulay ko'rinishda qaytaradi."""
     with _connect() as conn:
         rows = conn.execute(
             "SELECT id, name, full_norm, first_norm FROM items "
@@ -276,11 +254,7 @@ def get_items(session_id: int) -> list[dict]:
 
 
 def set_vote(item_id: int, user_id: int, user_name: str, value: int) -> bool:
-    """Ovozni qo'yadi/yangilaydi: value=1 ("+"), value=-1 ("-").
-
-    Xuddi shu qiymat bilan qayta yozilsa, o'zgarish bo'lmagan deb False
-    qaytaradi (ism yangilanadi, lekin hisobga ta'sir qilmaydi).
-    """
+    """Ovozni qo'yadi/yangilaydi: value=1 ("+"), value=-1 ("-")."""
     with _connect() as conn:
         row = conn.execute(
             "SELECT value FROM votes WHERE item_id = ? AND user_id = ?",
@@ -303,7 +277,7 @@ def set_vote(item_id: int, user_id: int, user_name: str, value: int) -> bool:
 
 
 def remove_all_votes(session_id: int, user_id: int) -> int:
-    """Foydalanuvchining shu sessiondagi barcha ovozlarini o'chiradi ("-" = kerak emas)."""
+    """Foydalanuvchining shu sessiondagi barcha ovozlarini o'chiradi."""
     with _connect() as conn:
         cur = conn.execute(
             "DELETE FROM votes WHERE user_id = ? AND item_id IN "
@@ -314,7 +288,6 @@ def remove_all_votes(session_id: int, user_id: int) -> int:
 
 
 def upsert_member(chat_id: int, user_id: int, name: str, username: str | None) -> None:
-    """Chatda ko'ringan a'zoni saqlaydi/yangilaydi (menyu chiqqanda teglash uchun)."""
     with _connect() as conn:
         conn.execute(
             "INSERT INTO members (chat_id, user_id, name, username) "
@@ -339,11 +312,6 @@ def get_members(chat_id: int) -> list[dict]:
 
 
 def get_counts(session_id: int) -> list[dict]:
-    """Har ovqat uchun {name, count, voters, minus_count, minus_voters} qaytaradi.
-
-    count/voters — "+" qo'yganlar, minus_count/minus_voters — aniq "-" deb
-    (ovqat nomini bildirib) rad etganlar.
-    """
     with _connect() as conn:
         items = conn.execute(
             "SELECT id, name FROM items WHERE session_id = ? ORDER BY id",
@@ -359,6 +327,7 @@ def get_counts(session_id: int) -> list[dict]:
             minus_names = [r["user_name"] for r in rows if r["value"] == -1]
             result.append(
                 {
+                    "item_id": it["id"],
                     "name": it["name"],
                     "count": len(plus_names),
                     "voters": plus_names,
@@ -370,7 +339,6 @@ def get_counts(session_id: int) -> list[dict]:
 
 
 def delete_member(chat_id: int, user_id: int) -> None:
-    """A'zoni teglash ro'yxatidan o'chiradi."""
     with _connect() as conn:
         conn.execute(
             "DELETE FROM members WHERE chat_id = ? AND user_id = ?",
@@ -379,14 +347,11 @@ def delete_member(chat_id: int, user_id: int) -> None:
 
 
 def get_pending_voters(session_id: int, chat_id: int) -> list[dict]:
-    """Ushbu sessiyada hali ovoz bermagan (plus ham, minus ham qo'ymagan) a'zolar ro'yxatini qaytaradi."""
     with _connect() as conn:
-        # Barcha ro'yxatdan o'tgan a'zolar
         members = conn.execute(
             "SELECT user_id, name, username FROM members WHERE chat_id = ? ORDER BY rowid",
             (chat_id,),
         ).fetchall()
-        # Ovoz bergan a'zolar IDlari
         voted = conn.execute(
             "SELECT DISTINCT user_id FROM votes WHERE item_id IN "
             "(SELECT id FROM items WHERE session_id = ?)",
