@@ -279,11 +279,11 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         menu = _menu_lines(text, min_lines=1 if is_forwarded else MIN_MENU_LINES)
         if menu is not None:
             is_menu_val = gemini_intent.is_menu(menu)
-            # Agar Gemini ishlagan bo'lsa va False qaytargan bo'lsa, rad etamiz.
-            # Agar Gemini bo'lmasa (None) va xabar forward qilinmagan bo'lsa ham rad etamiz (ehtiyotkorlik).
-            # Ammo Gemini bo'lmasa (None) va xabar forward qilingan bo'lsa, mahalliy qoidaga ko'ra menyu deb hisoblayveramiz.
-            if is_menu_val is False or (is_menu_val is None and not is_forwarded):
+            # Faqat Gemini aniq False (menyu emas) qaytarsa rad etamiz.
+            # Gemini mavjud bo'lmasa (None), mahalliy qoidaga ko'ra menyu deb hisoblaymiz.
+            if is_menu_val is False:
                 menu = None
+
         if menu is not None:
             session_id = db.create_menu(chat_id, message.message_id, menu)
             session = db.get_open_session(chat_id)
@@ -576,6 +576,29 @@ async def povor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await message.reply_text(f"⚠️ Xatolik: {detail}")
 
 
+async def povor_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Oshpaz guruhi sozlamalari va joriy sessiya holatini ko'rsatish."""
+    message = update.message
+    session = db.get_open_session(message.chat_id)
+    chef_config = db.get_chef_config()
+
+    lines = ["ℹ️ Oshpaz sozlamalari va holati:\n"]
+    if chef_config:
+        lines.append(f"📍 Oshpaz chat ID: `{chef_config['chat_id']}`")
+        lines.append(f"👨‍🍳 Oshpaz tegi: {chef_config['tag']}")
+    else:
+        lines.append("❌ Oshpaz guruhi hali sozlanmagan! (Oshpaz guruhida `/set_povar @tag` deb yozing)")
+
+    if session:
+        chef_msg = session['chef_message_id'] or 'Yo\'q (hali yuborilmagan)'
+        lines.append(f"\n✅ Joriy guruhda faol menyu bor (Sessiya ID: {session['id']})")
+        lines.append(f"📩 Oshpaz xabar ID: `{chef_msg}`")
+    else:
+        lines.append("\n⚠️ Ushbu guruhda hozircha faol menyu yo'q.")
+
+    await message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
 class _HealthHandler(BaseHTTPRequestHandler):
     """Render (yoki boshqa hosting) 'web service' sifatida tan olishi va
     uxlab qolmasligi uchun tashqi ping xizmatlari (masalan UptimeRobot)
@@ -627,9 +650,13 @@ def main() -> None:
     for cmd in ("povor", "povar", "oshpaz", "shef", "chef"):
         app.add_handler(CommandHandler(cmd, povor))
 
+    for cmd in ("povar_info", "povor_info", "povar_status", "status_povar"):
+        app.add_handler(CommandHandler(cmd, povor_info))
+
     app.add_handler(
         MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_members)
     )
+
 
 
     # Buyruq bo'lmagan barcha matnli xabarlar (menyu yoki ovoz)
