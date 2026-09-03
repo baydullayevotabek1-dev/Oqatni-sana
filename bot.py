@@ -137,6 +137,55 @@ def _summary_text(session_id: int, chat_id: int) -> str:
     return "\n".join(lines)
 
 
+def _chef_summary_text(session_id: int, chef_tag: str) -> str:
+    counts = db.get_counts(session_id)
+    lines = [f"👨‍🍳 {chef_tag} Bugungi umumiy ovqat buyurtmalari:\n"]
+    total = 0
+    for c in counts:
+        line = f"• {c['name']} — {c['count']} ta (+)"
+        if c["minus_count"]:
+            line += f" / {c['minus_count']} ta (-)"
+        lines.append(line)
+        total += c["count"]
+    lines.append(f"\n📦 Jami: {total} ta ovqat")
+    lines.append("\n🔒 *Eslatma: Ushbu hisobot to'liq anonim (foydalanuvchilar ismlari kiritilmagan).*")
+    return "\n".join(lines)
+
+
+async def _refresh_chef_summary(context, session) -> tuple[bool, str]:
+    """Oshpaz guruhiga anonim jonli hisobni yuboradi yoki yangilaydi."""
+    chef_config = db.get_chef_config()
+    if chef_config is None:
+        return False, "Oshpaz guruhi hali sozlanmagan. Oshpaz guruhida `/set_chef @povor_username` deb yozing."
+
+    chef_chat_id = chef_config["chat_id"]
+    chef_tag = chef_config["tag"]
+    text = _chef_summary_text(session["id"], chef_tag)
+
+    msg_id = dict(session).get("chef_message_id")
+    if msg_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chef_chat_id, message_id=msg_id, text=text
+            )
+            return True, "Oshpaz guruhidagi hisobot yangilandi."
+        except BadRequest as e:
+            if "not modified" in str(e).lower():
+                return True, "Hisobot o'zgarmadi."
+            # xabar o'chirilgan bo'lsa yangi yuboramiz
+        except Exception as e:
+            logger.warning("Oshpaz xabarini tahrirlashda xato: %s", e)
+
+    try:
+        sent = await context.bot.send_message(chat_id=chef_chat_id, text=text)
+        db.set_chef_message(session["id"], sent.message_id)
+        return True, "Oshpaz guruhiga hisobot jonli yuborildi."
+    except Exception as e:
+        logger.error("Oshpaz guruhiga xabar yuborishda xato: %s", e)
+        return False, f"Oshpaz guruhiga xabar yuborib bo'lmadi: {e}. Bot Oshpaz guruhiga a'zo qilinganini va yozish huquqi borligini tekshiring."
+
+
+
 async def _refresh_summary(context, chat_id: int, session) -> None:
     """Jonli hisob xabarini yangilaydi (bo'lmasa yangi yaratadi)."""
     text = _summary_text(session["id"], chat_id)
@@ -146,13 +195,18 @@ async def _refresh_summary(context, chat_id: int, session) -> None:
             await context.bot.edit_message_text(
                 chat_id=chat_id, message_id=msg_id, text=text
             )
-            return
         except BadRequest as e:
             if "not modified" in str(e).lower():
-                return
-            # xabar o'chirilgan/tahrirlab bo'lmasa — yangisini yuboramiz
-    sent = await context.bot.send_message(chat_id=chat_id, text=text)
-    db.set_summary_message(session["id"], sent.message_id)
+                pass
+            else:
+                sent = await context.bot.send_message(chat_id=chat_id, text=text)
+                db.set_summary_message(session["id"], sent.message_id)
+    else:
+        sent = await context.bot.send_message(chat_id=chat_id, text=text)
+        db.set_summary_message(session["id"], sent.message_id)
+
+    await _refresh_chef_summary(context, session)
+
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -167,6 +221,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "• /eslat — hali ovoz bermagan a'zolarni teglab eslatish\n"
         "• /menyu — qo'lda menyu yaratish (masalan: `/menyu Osh, Somsa`)\n"
         "• /bekor — xato aniqlangan oxirgi menyuni va uning sessiyasini bekor qilish\n"
+        "• /set_chef — oshpaz guruhini sozlash (masalan: `/set_chef @shef_povor`)\n"
+        "• /povor — oshpaz guruhiga hisobotni qayta yuborish/yangilash\n"
         "• /tugat — joriy menyuni yopish\n\n"
         "Ovoz berish usullari:\n"
         "• Menyu xabariga reply qilib yoki ovqat nomini yozib \"+\" yoki \"-\" belgilarini yozish (erkin matnlar ham Gemini AI orqali tushuniladi)."
@@ -463,6 +519,63 @@ async def chiqish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def set_chef(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Oshpaz guruhi va oshpaz tegini sozlash buyrug'i."""
+    message = update.message
+    args = context.args or []
+
+    target_chat_id = None
+    tag = "@shef_povor"
+
+    if args and (args[0].startswith("-") or args[0].isdigit()):
+        try:
+            target_chat_id = int(args[0])
+            if len(args) > 1:
+                tag = args[1]
+        except ValueError:
+            pass
+
+    if target_chat_id is None:
+        if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+            await message.reply_text(
+                "Iltimos, bu buyruqni Oshpaz guruhining o'zida yuboring (`/set_chef @username`), "
+                "yoki chat ID bilan yozing: `/set_chef -100xxxxxxxxxx @username`",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+        target_chat_id = message.chat_id
+        if args:
+            tag = args[0]
+
+    if not tag.startswith("@") and not tag.startswith("http"):
+        tag = f"@{tag}"
+
+    db.set_chef_config(target_chat_id, tag)
+    chat_title = getattr(message.chat, "title", None) or "Oshpaz guruhi"
+    await message.reply_text(
+        f"✅ Oshpaz guruhi saqlandi!\n"
+        f"📍 Chat: {html.escape(chat_title)} (`{target_chat_id}`)\n"
+        f"👨‍🍳 Oshpaz tegi: {tag}\n\n"
+        "Endi menyu ochilib ovoz berilganda, anonim hisobot jonli ravishda shu guruhga kelib turadi.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+async def povor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Oshpaz guruhiga anonim hisobotni qo'lda qayta yuborish/yangilash buyrug'i."""
+    message = update.message
+    session = db.get_open_session(message.chat_id)
+    if session is None:
+        await message.reply_text("Hozircha faol menyu yo'q.")
+        return
+
+    ok, detail = await _refresh_chef_summary(context, session)
+    if ok:
+        await message.reply_text(f"👨‍🍳 {detail}")
+    else:
+        await message.reply_text(f"⚠️ Xatolik: {detail}")
+
+
 class _HealthHandler(BaseHTTPRequestHandler):
     """Render (yoki boshqa hosting) 'web service' sifatida tan olishi va
     uxlab qolmasligi uchun tashqi ping xizmatlari (masalan UptimeRobot)
@@ -507,9 +620,18 @@ def main() -> None:
     app.add_handler(CommandHandler("menyu", menyu))
     app.add_handler(CommandHandler("eslat", eslat))
     app.add_handler(CommandHandler("chiqish", chiqish))
+
+    for cmd in ("set_chef", "set_povor", "set_povar", "set_shef", "set_chef_group"):
+        app.add_handler(CommandHandler(cmd, set_chef))
+
+    for cmd in ("povor", "povar", "oshpaz", "shef", "chef"):
+        app.add_handler(CommandHandler(cmd, povor))
+
     app.add_handler(
         MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_members)
     )
+
+
     # Buyruq bo'lmagan barcha matnli xabarlar (menyu yoki ovoz)
     app.add_handler(
         MessageHandler(

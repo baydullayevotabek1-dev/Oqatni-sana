@@ -68,6 +68,11 @@ def init_db() -> None:
                 username TEXT,
                 PRIMARY KEY (chat_id, user_id)
             );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             """
         )
         # Migratsiya: eski (Render'da allaqachon yaratilgan) "votes" jadvalida
@@ -77,6 +82,65 @@ def init_db() -> None:
             conn.execute(
                 "ALTER TABLE votes ADD COLUMN value INTEGER NOT NULL DEFAULT 1"
             )
+
+        sess_cols = {r["name"] for r in conn.execute("PRAGMA table_info(sessions)")}
+        if "chef_message_id" not in sess_cols:
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN chef_message_id INTEGER"
+            )
+
+
+def set_chef_config(chat_id: int, tag: str | None = None) -> None:
+    """Oshpaz guruhi ID'si va tegini saqlaydi."""
+    import os
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('chef_chat_id', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(chat_id),),
+        )
+        if tag is not None:
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('chef_tag', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (tag,),
+            )
+
+
+def get_chef_config() -> dict | None:
+    """Oshpaz guruhi sozlamalarini qaytaradi: {'chat_id': int, 'tag': str}."""
+    import os
+    chat_id = None
+    tag = None
+    with _connect() as conn:
+        r_id = conn.execute("SELECT value FROM settings WHERE key = 'chef_chat_id'").fetchone()
+        r_tag = conn.execute("SELECT value FROM settings WHERE key = 'chef_tag'").fetchone()
+        if r_id:
+            chat_id = int(r_id["value"])
+        if r_tag:
+            tag = r_tag["value"]
+
+    # Environment variables fallback
+    if chat_id is None and os.getenv("CHEF_CHAT_ID"):
+        try:
+            chat_id = int(os.getenv("CHEF_CHAT_ID"))
+        except ValueError:
+            pass
+    if tag is None:
+        tag = os.getenv("CHEF_TAG", "@shef_povor")
+
+    if chat_id is None:
+        return None
+    return {"chat_id": chat_id, "tag": tag}
+
+
+def set_chef_message(session_id: int, message_id: int) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE sessions SET chef_message_id = ? WHERE id = ?",
+            (message_id, session_id),
+        )
+
 
 
 def create_menu(chat_id: int, menu_message_id: int, names: list[str]) -> int:

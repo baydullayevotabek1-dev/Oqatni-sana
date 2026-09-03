@@ -10,5 +10,10 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: CHEF_CHAT_ID
+        sync: false
+      - key: CHEF_TAG
+        sync: false
       - key: PYTHON_VERSION
         value: 3.12.7
+
