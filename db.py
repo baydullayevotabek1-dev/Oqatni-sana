@@ -84,10 +84,31 @@ def init_db() -> None:
             )
 
         sess_cols = {r["name"] for r in conn.execute("PRAGMA table_info(sessions)")}
-        if "chef_message_id" not in sess_cols:
-            conn.execute(
-                "ALTER TABLE sessions ADD COLUMN chef_message_id INTEGER"
+        for col in ("menu_message_id", "summary_message_id", "chef_message_id"):
+            if col not in sess_cols:
+                conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} INTEGER")
+
+        item_cols = {r["name"] for r in conn.execute("PRAGMA table_info(items)")}
+        if "chat_id" in item_cols or "full_norm" not in item_cols:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS items_new (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    name       TEXT    NOT NULL,
+                    full_norm  TEXT    NOT NULL DEFAULT '',
+                    first_norm TEXT    NOT NULL DEFAULT '',
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                );
+                INSERT INTO items_new (id, session_id, name)
+                SELECT id, session_id, name FROM items;
+                DROP TABLE items;
+                ALTER TABLE items_new RENAME TO items;
+                """
             )
+
+
+
 
 
 def set_chef_config(chat_id: int, tag: str | None = None) -> None:
