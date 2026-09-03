@@ -533,9 +533,9 @@ async def set_chef(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if target_chat_id is None:
         if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
             await message.reply_text(
-                "Iltimos, bu buyruqni Oshpaz guruhining o'zida yuboring (`/set_chef @username`), "
-                "yoki chat ID bilan yozing: `/set_chef -100xxxxxxxxxx @username`",
-                parse_mode=ParseMode.MARKDOWN,
+                "Iltimos, bu buyruqni Oshpaz guruhining o'zida yuboring (<code>/set_chef @username</code>), "
+                "yoki chat ID bilan yozing: <code>/set_chef -100xxxxxxxxxx @username</code>",
+                parse_mode=ParseMode.HTML,
             )
             return
         target_chat_id = message.chat_id
@@ -547,12 +547,15 @@ async def set_chef(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     db.set_chef_config(target_chat_id, tag)
     chat_title = getattr(message.chat, "title", None) or "Oshpaz guruhi"
+    safe_title = html.escape(str(chat_title))
+    safe_tag = html.escape(str(tag))
+
     await message.reply_text(
-        f"✅ Oshpaz guruhi saqlandi!\n"
-        f"📍 Chat: {html.escape(chat_title)} (`{target_chat_id}`)\n"
-        f"👨‍🍳 Oshpaz tegi: {tag}\n\n"
+        f"✅ <b>Oshpaz guruhi saqlandi!</b>\n"
+        f"📍 Chat: <b>{safe_title}</b> (<code>{target_chat_id}</code>)\n"
+        f"👨‍🍳 Oshpaz tegi: {safe_tag}\n\n"
         "Endi menyu ochilib ovoz berilganda, anonim hisobot jonli ravishda shu guruhga kelib turadi.",
-        parse_mode=ParseMode.MARKDOWN,
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -575,21 +578,22 @@ async def povor_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     session = db.get_open_session(message.chat_id)
     chef_config = db.get_chef_config()
 
-    lines = ["ℹ️ Oshpaz sozlamalari va holati:\n"]
+    lines = ["<b>ℹ️ Oshpaz sozlamalari va holati:</b>\n"]
     if chef_config:
-        lines.append(f"📍 Oshpaz chat ID: `{chef_config['chat_id']}`")
-        lines.append(f"👨‍🍳 Oshpaz tegi: {chef_config['tag']}")
+        lines.append(f"📍 Oshpaz chat ID: <code>{chef_config['chat_id']}</code>")
+        lines.append(f"👨‍🍳 Oshpaz tegi: {html.escape(str(chef_config['tag']))}")
     else:
-        lines.append("❌ Oshpaz guruhi hali sozlanmagan! (Oshpaz guruhida `/set_povar @tag` deb yozing)")
+        lines.append("❌ Oshpaz guruhi hali sozlanmagan! (Oshpaz guruhida <code>/set_povar @tag</code> deb yozing)")
 
     if session:
         chef_msg = session['chef_message_id'] or 'Yo\'q (hali yuborilmagan)'
         lines.append(f"\n✅ Joriy guruhda faol menyu bor (Sessiya ID: {session['id']})")
-        lines.append(f"📩 Oshpaz xabar ID: `{chef_msg}`")
+        lines.append(f"📩 Oshpaz xabar ID: <code>{chef_msg}</code>")
     else:
         lines.append("\n⚠️ Ushbu guruhda hozircha faol menyu yo'q.")
 
-    await message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+    await message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
 
 
 async def post_daily_report(context: ContextTypes.DEFAULT_TYPE) -> None:
