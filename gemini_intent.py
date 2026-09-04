@@ -16,7 +16,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gemini-3.6-flash"
+_MODEL = "gemini-3.5-flash-lite"
 
 
 _client = None
