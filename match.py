@@ -87,11 +87,16 @@ def match_items(text: str, items: list[dict]) -> list[dict]:
 
 
 def match_by_number(text: str, items: list[dict]) -> list[dict]:
-    """Matnda "1", "2" kabi ovqat tartib raqami yozilgan bo'lsa, o'sha
-    o'rindagi ovqat(lar)ni qaytaradi (1-indeksli, menyu tartibi bo'yicha).
+    """Matn FAQAT ovqat tartib raqami(lari)dan iborat bo'lsa (masalan "2",
+    "2+", "1, 3"), tegishli ovqat(lar)ni qaytaradi (1-indeksli, menyu
+    tartibi bo'yicha).
 
-    Masalan 3 ta ovqatli menyuda "2" yoki "2+" -> ikkinchi ovqat.
+    Matn ichida boshqa so'zlar ham bo'lsa (masalan "2 soatdan keyin
+    kelaman"), hech narsa qaytarmaydi — aks holda uzun gap ichidagi
+    tasodifiy raqam ovqat tanlovi deb noto'g'ri talqin qilinardi.
     """
+    if not re.fullmatch(r"[\d,\s+\-.]+", text.strip()):
+        return []
     matched: list[dict] = []
     seen_ids: set = set()
     for tok in re.findall(r"\d+", text):

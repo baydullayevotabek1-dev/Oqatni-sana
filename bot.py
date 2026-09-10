@@ -128,7 +128,7 @@ def _chef_summary_text(session_id: int, chef_tag: str) -> str:
         lines.append(line)
         total += c["count"]
     lines.append(f"\n📦 Jami: {total} ta ovqat")
-    lines.append("\n🔒 *Eslatma: Ushbu hisobot to'liq anonim (foydalanuvchilar ismlari kiritilmagan).*")
+    lines.append("\n🔒 Eslatma: Ushbu hisobot to'liq anonim (foydalanuvchilar ismlari kiritilmagan).")
     return "\n".join(lines)
 
 
@@ -262,10 +262,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+def _is_chef_group(chat_id: int) -> bool:
+    """Berilgan chat oshpaz guruhimi — u yerda menyu/ovoz ishlamaydi."""
+    cfg = db.get_chef_config()
+    return cfg is not None and cfg["chat_id"] == chat_id
+
+
 async def royxat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
     if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
         await message.reply_text("Bu buyruq faqat guruhda ishlaydi.")
+        return
+    if _is_chef_group(message.chat_id):
         return
     user = message.from_user
     db.upsert_member(message.chat_id, user.id, user.full_name, user.username)
@@ -292,11 +300,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     chat_id = message.chat_id
 
-    chef_config = db.get_chef_config()
-    if chef_config and chef_config["chat_id"] == chat_id:
-        # Oshpaz guruhida mustaqil menyu/ovoz tizimi ishlamaydi — bu guruh
-        # faqat _refresh_chef_summary orqali push qilinadigan anonim
-        # sonlarni qabul qiladi.
+    if _is_chef_group(chat_id):
         return
 
     db.upsert_member(chat_id, user.id, user.full_name, user.username)
@@ -410,6 +414,8 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def hisob(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
+    if _is_chef_group(message.chat_id):
+        return
     session = db.get_open_session(message.chat_id)
     if session is None:
         await message.reply_text("Hozircha menyu aniqlanmadi.")
@@ -420,6 +426,8 @@ async def hisob(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def tugat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
+    if _is_chef_group(message.chat_id):
+        return
     if db.close_session(message.chat_id):
         await message.reply_text("Menyu yopildi.")
     else:
@@ -429,6 +437,8 @@ async def tugat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def bekor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
     chat_id = message.chat_id
+    if _is_chef_group(chat_id):
+        return
     cancelled_session = db.reopen_previous_session(chat_id)
     if cancelled_session is not None:
         session = db.get_open_session(chat_id)
@@ -449,6 +459,8 @@ async def menyu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
     if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
         await message.reply_text("Bu buyruq faqat guruhda ishlaydi.")
+        return
+    if _is_chef_group(message.chat_id):
         return
 
     args = context.args
@@ -498,6 +510,8 @@ async def eslat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
     if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
         await message.reply_text("Bu buyruq faqat guruhda ishlaydi.")
+        return
+    if _is_chef_group(message.chat_id):
         return
 
     chat_id = message.chat_id
@@ -638,6 +652,9 @@ async def post_daily_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Soat 10:50 da yakuniy hisobotni 1-guruhga va Oshpaz guruhiga yuboradi,
     so'ng sessiyani yopadi — shundan keyin ovoz qabul qilinmaydi."""
     for session in db.get_all_open_sessions():
+        if _is_chef_group(session["chat_id"]):
+            db.close_session(session["chat_id"])
+            continue
         text = (
             "⏰ Soat 10:50 — Yakuniy hisobot (ovoz berish yakunlandi):\n\n"
             + _summary_text(session["id"], session["chat_id"])
