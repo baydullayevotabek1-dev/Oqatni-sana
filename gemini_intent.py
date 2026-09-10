@@ -41,6 +41,11 @@ def _get_client():
     return _client
 
 
+def is_available() -> bool:
+    """GEMINI_API_KEY sozlangan va mijoz ishga tushirilganmi."""
+    return _get_client() is not None
+
+
 _RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {

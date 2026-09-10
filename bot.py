@@ -304,6 +304,12 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             is_menu_val = gemini_intent.is_menu(menu)
             if is_menu_val is False:
                 menu = None
+            elif is_menu_val is None and gemini_intent.is_available():
+                # Gemini sozlangan, lekin bu safar aniq javob berolmadi
+                # (tarmoq xatosi, kvota va h.k.) — ehtiyotkorlik bilan
+                # "menyu emas" deb hisoblaymiz, shunda oddiy suhbat xabari
+                # noto'g'ri sessiya ochib, guruhni bekorga teglab yubormaydi.
+                menu = None
 
         if menu is not None:
             session_id = db.create_menu(chat_id, message.message_id, menu)
