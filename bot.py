@@ -291,6 +291,14 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
 
     chat_id = message.chat_id
+
+    chef_config = db.get_chef_config()
+    if chef_config and chef_config["chat_id"] == chat_id:
+        # Oshpaz guruhida mustaqil menyu/ovoz tizimi ishlamaydi — bu guruh
+        # faqat _refresh_chef_summary orqali push qilinadigan anonim
+        # sonlarni qabul qiladi.
+        return
+
     db.upsert_member(chat_id, user.id, user.full_name, user.username)
 
     text = message.text or message.caption or ""
