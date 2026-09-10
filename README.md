@@ -16,9 +16,9 @@ Ish guruhida har kuni ovqat menyusi chiqqanda, kim qaysi ovqatni tanlaganini
    bersa, bot mahalliy oddiy qoidalarga (nom/raqam moslash) qaytadi.
 4. Bot jonli hisob xabarini yangilab boradi — har ovqat uchun "+" va "-"
    sonlari alohida ko'rsatiladi. `/hisob` bilan ham ko'rish mumkin.
-5. Har kuni soat **10:45** (Toshkent vaqti) da bot avtomatik hisobotni
-   guruhga va Oshpaz guruhiga yuboradi — sessiya yopilmaydi, undan keyin ham ovoz berish
-   davom etadi.
+5. Har kuni soat **10:50** (Toshkent vaqti) da bot yakuniy hisobotni
+   guruhga va Oshpaz guruhiga yuboradi va sessiyani yopadi — shundan keyin
+   o'sha kunlik menyu uchun ovoz qabul qilinmaydi.
 6. **Oshpaz guruhiga anonim yuborish:** Oshpaz guruhida `/set_chef @shef_povor` deb
    yozilsa, bot o'sha guruhga faqat anonim umumiy ovqatlar sonini jonli yuborib turadi.
 

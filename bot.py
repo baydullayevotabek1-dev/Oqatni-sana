@@ -611,11 +611,16 @@ async def povor_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def post_daily_report(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Soat 10:50 da yakuniy hisobotni 1-guruhga va Oshpaz guruhiga yuboradi,
+    so'ng sessiyani yopadi — shundan keyin ovoz qabul qilinmaydi."""
     for session in db.get_all_open_sessions():
-        text = "⏰ Soat 10:45 hisoboti:\n\n" + _summary_text(session["id"], session["chat_id"])
-        reply_markup = _build_inline_keyboard(session["id"])
-        await context.bot.send_message(chat_id=session["chat_id"], text=text, reply_markup=reply_markup)
+        text = (
+            "⏰ Soat 10:50 — Yakuniy hisobot (ovoz berish yakunlandi):\n\n"
+            + _summary_text(session["id"], session["chat_id"])
+        )
+        await context.bot.send_message(chat_id=session["chat_id"], text=text)
         await _refresh_chef_summary(context, session)
+        db.close_session(session["chat_id"])
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
@@ -682,7 +687,7 @@ def main() -> None:
     if app.job_queue is not None:
         app.job_queue.run_daily(
             post_daily_report,
-            time=dt.time(hour=10, minute=45, tzinfo=ZoneInfo("Asia/Tashkent")),
+            time=dt.time(hour=10, minute=50, tzinfo=ZoneInfo("Asia/Tashkent")),
         )
 
     logger.info("Bot ishga tushdi. To'xtatish uchun Ctrl+C.")
