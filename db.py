@@ -253,9 +253,20 @@ def get_items(session_id: int) -> list[dict]:
         ]
 
 
-def set_vote(item_id: int, user_id: int, user_name: str, value: int) -> bool:
-    """Ovozni qo'yadi/yangilaydi: value=1 ("+"), value=-1 ("-")."""
+def set_vote(item_id: int, user_id: int, user_name: str, value: int, session_id: int | None = None) -> bool:
+    """Ovozni qo'yadi/yangilaydi: value=1 ("+"), value=-1 ("-").
+
+    Agar value=1 va session_id berilgan bo'lsa, foydalanuvchining shu
+    sessiondagi boshqa barcha "+" ovozlari avval o'chiriladi — bitta odam
+    bir vaqtda faqat bitta ovqatni tanlay oladi.
+    """
     with _connect() as conn:
+        if value == 1 and session_id is not None:
+            conn.execute(
+                "DELETE FROM votes WHERE user_id = ? AND value = 1 AND item_id IN "
+                "(SELECT id FROM items WHERE session_id = ? AND id != ?)",
+                (user_id, session_id, item_id),
+            )
         row = conn.execute(
             "SELECT value FROM votes WHERE item_id = ? AND user_id = ?",
             (item_id, user_id),

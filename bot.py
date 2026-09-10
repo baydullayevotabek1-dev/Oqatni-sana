@@ -229,7 +229,7 @@ async def on_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if data.startswith("vote_item_"):
         item_id = int(data.split("_")[2])
-        changed = db.set_vote(item_id, user.id, display_name, 1)
+        changed = db.set_vote(item_id, user.id, display_name, 1, session_id=session["id"])
         await query.answer("✅ Ovozingiz qabul qilindi!" if changed else "Ovoz allaqachon qo'yilgan.")
         await _refresh_summary(context, chat_id, session)
 
@@ -382,7 +382,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     else:
         if matched and (has_plus or len(matched) == 1):
             for it in matched:
-                if db.set_vote(it["id"], user.id, _display_name(user), 1):
+                if db.set_vote(it["id"], user.id, _display_name(user), 1, session_id=session["id"]):
                     changed = True
 
     if changed:
