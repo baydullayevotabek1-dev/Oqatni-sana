@@ -398,6 +398,11 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             for it in matched:
                 if db.set_vote(it["id"], user.id, _display_name(user), 1, session_id=session["id"]):
                     changed = True
+            if len(matched) > 1:
+                await message.reply_text(
+                    f"ℹ️ {_display_name(user)}, bir vaqtning o'zida faqat bitta ovqat "
+                    f"tanlashingiz mumkin — so'nggi tanlovingiz (\"{matched[-1]['name']}\") qabul qilindi."
+                )
 
     if changed:
         await _refresh_summary(context, chat_id, session)
