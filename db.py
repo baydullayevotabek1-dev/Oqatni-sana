@@ -196,6 +196,15 @@ def get_all_open_sessions() -> list[sqlite3.Row]:
         return conn.execute("SELECT * FROM sessions WHERE is_open = 1").fetchall()
 
 
+def chat_has_sessions(chat_id: int) -> bool:
+    """Shu chatda ilgari (yoki hozir) biror menyu sessiyasi bo'lganmi."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM sessions WHERE chat_id = ? LIMIT 1", (chat_id,)
+        ).fetchone()
+        return row is not None
+
+
 def reopen_previous_session(chat_id: int) -> sqlite3.Row | None:
     """Joriy sessiyani yopib, oldingisini tiklaydi."""
     with _connect() as conn:

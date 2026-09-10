@@ -565,17 +565,28 @@ async def set_chef(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not tag.startswith("@") and not tag.startswith("http"):
         tag = f"@{tag}"
 
+    had_sessions = db.chat_has_sessions(target_chat_id)
     db.set_chef_config(target_chat_id, tag)
     chat_title = getattr(message.chat, "title", None) or "Oshpaz guruhi"
     safe_title = html.escape(str(chat_title))
     safe_tag = html.escape(str(tag))
+
+    warning = ""
+    if had_sessions:
+        warning = (
+            "\n\n⚠️ <b>Diqqat:</b> bu guruhda ilgari menyu/ovoz sessiyalari bo'lgan. "
+            "Agar bu sizning ovqat tanlanadigan ASOSIY guruhingiz bo'lsa, uni Oshpaz "
+            "guruhi qilib belgilamang — Oshpaz guruhi sifatida sozlangan chatda "
+            "endi avtomatik menyu aniqlash va \"+\"/\"-\" ovoz qabul qilish ishlamaydi."
+        )
 
     await message.reply_text(
         f"✅ <b>Oshpaz guruhi va tegi doimiy saqlandi!</b>\n\n"
         f"📍 Chat: <b>{safe_title}</b> (<code>{target_chat_id}</code>)\n"
         f"👨‍🍳 Oshpaz tegi: <b>{safe_tag}</b>\n\n"
         "🔒 <b>Ushbu sozlama bir marta o'rnatildi va doimiy saqlanadi.</b>\n"
-        "Keyinchalik oshpazni yoki guruhni o'zgartirmoqchi bo'lsangiz, shunchaki qaytadan <code>/set_povar @yangi_povor</code> deb yozsangiz kifoya.",
+        "Keyinchalik oshpazni yoki guruhni o'zgartirmoqchi bo'lsangiz, shunchaki qaytadan <code>/set_povar @yangi_povor</code> deb yozsangiz kifoya."
+        f"{warning}",
         parse_mode=ParseMode.HTML,
     )
 
