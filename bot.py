@@ -4,6 +4,7 @@ import datetime as dt
 import html
 import logging
 import os
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from zoneinfo import ZoneInfo
@@ -35,6 +36,8 @@ MIN_MENU_LINES = 2
 MAX_MENU_LINES = 10
 MAX_LINE_LEN = 50
 
+_LEADING_MARKER_RE = re.compile(r"^\s*(?:\d+\s*[.\)\-]|[-•*])\s*")
+
 
 def _display_name(user) -> str:
     if user.username:
@@ -42,8 +45,23 @@ def _display_name(user) -> str:
     return user.full_name or "A'zo"
 
 
+def _clean_menu_line(line: str) -> str:
+    """Qator boshidagi raqamlash/bullet belgilarini olib tashlaydi.
+
+    Odamlar menyuni o'zlari "1) Osh", "2. Somsa" kabi raqamlab yozishi
+    mumkin — bot buni bilmasdan qoldirib qo'ysa, o'z raqami ustiga
+    kimningdir raqami qo'shilib ("2. 1) Osh" kabi) chalkash nom chiqadi.
+    """
+    line = line.strip()
+    prev = None
+    while prev != line:
+        prev = line
+        line = _LEADING_MARKER_RE.sub("", line, count=1).strip(" \t.-•*")
+    return line
+
+
 def _menu_lines(text: str, min_lines: int = MIN_MENU_LINES) -> list[str] | None:
-    raw = [ln.strip(" \t.-•*") for ln in text.splitlines()]
+    raw = [_clean_menu_line(ln) for ln in text.splitlines()]
     lines = [ln for ln in raw if ln]
     if not (1 <= len(lines) <= MAX_MENU_LINES):
         return None
@@ -478,7 +496,8 @@ async def menyu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         raw_items = raw_text.split(",")
 
-    menu = [ln.strip(" \t.-•*") for ln in raw_items if ln.strip()]
+    menu = [_clean_menu_line(ln) for ln in raw_items if ln.strip()]
+    menu = [ln for ln in menu if ln]
     if not menu:
         await message.reply_text("Hech qanday ovqat nomi topilmadi.")
         return
